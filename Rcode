@@ -1,0 +1,401 @@
+library(readr)
+data<-Hackathon_data <- read_csv("Hackathon_data.csv")
+
+str(data)
+head(data)
+
+# Imputation --------------------------------------------------------------
+
+#imputed with missforest
+# Load the necessary libraries
+library(readr)
+library(missForest)
+
+# Define column types (adjust as needed)
+column_types <- cols(
+  rcasiteid = col_character(),
+  fragvolc = col_double(),
+  SOC_pred1 = col_double(),
+  TOP = col_double(),
+  BOT = col_double(),
+  BD = col_double(),
+  LandUse = col_integer(),  # Change to integer to match the numeric values
+  upedonid = col_character(),
+  MO = col_double(),
+  MOGr = col_double(),
+  LU = col_character(),
+  MOGrLU = col_character(),
+  upedon = col_character(),
+  SOCstock5 = col_double(),
+  SOCstock30 = col_double(),
+  SOCstock100 = col_double(),
+  total_thickness = col_double(),
+  SOC_thickness = col_double(),
+  USE = col_double()
+)
+
+# Assuming 'data' contains the training data with missing values
+
+# Exclude the 'rcasiteid' column from modeling
+data_for_modeling <- data[, !(names(data) %in% c("rcasiteid"))]
+
+# Impute missing values using missForest
+imputed_data <- missForest(data_for_modeling)
+
+# The imputed data is stored in 'ximp' of the imputed_data object
+data1 <- imputed_data$ximp
+
+# Print the imputed dataset
+print(data1)
+
+
+# RFmodel -----------------------------------------------------------------
+
+# Assuming 'data1' is your dataset with the 'SOC_pred1' column and other predictors
+
+# Split the dataset into training and testing sets (80% training, 20% testing)
+set.seed(123) # For reproducibility
+train_size <- round(0.8 * nrow(data1))
+train_idx <- sample(nrow(data1), train_size)
+train_data <- data1[train_idx, ]
+test_data <- data1[-train_idx, ]
+
+# Random Forest (RF) model
+library(randomForest)
+
+# Exclude the 'rcasiteid' column from modeling
+train_data <- train_data[, !(names(train_data) %in% c("rcasiteid"))]
+test_data <- test_data[, !(names(test_data) %in% c("rcasiteid"))]
+
+rf_model <- randomForest(SOC_pred1 ~ ., data = train_data, ntree = 500)
+
+# Make predictions on the testing data
+rf_pred <- predict(rf_model, newdata = test_data)
+
+print(rf_pred)
+
+# Assuming you have the observed values ('SOC_pred1' column in 'test_data')
+# and the predicted values ('rf_pred') from the random forest model
+
+# Load the necessary library
+library(caret)
+
+# Extract observed values from test_data
+observed_values <- test_data$SOC_pred1
+
+# Calculate MAE
+mae <- mean(abs(observed_values - rf_pred))
+
+# Calculate RMSE
+rmse <- sqrt(mean((observed_values - rf_pred)^2))
+
+# Calculate R-squared (R²)
+r_squared <- cor(observed_values, rf_pred)^2
+
+# Print the calculated metrics
+RF_MAE<-cat("Mean Absolute Error (MAE):", round(mae, 2), "\n")
+RF_RMSE<-cat("Root Mean Squared Error (RMSE):", round(rmse, 2), "\n")
+RF_R2<-cat("R-squared (R²):", round(r_squared, 2), "\n")
+
+
+# Charts_RF ---------------------------------------------------------------
+
+# Load the necessary library
+library(ggplot2)
+
+# Create a data frame for the plot
+plot_data_rf <- data.frame(Observed = test_data$SOC_pred1, Predicted = rf_pred)
+
+# Calculate the maximum observed and predicted values
+max_observed <- max(plot_data_rf$Observed, na.rm = TRUE)
+max_predicted <- max(plot_data_rf$Predicted, na.rm = TRUE)
+
+# Create the scatter plot with annotations
+scatter_plot_rf <- ggplot(plot_data_rf, aes(x = Observed, y = Predicted)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "blue", linetype = "solid") +
+  labs(x = "Observed", y = "Predicted", title = "Random forest") +
+  theme_bw()+
+  annotate("text", x = max_observed, y = max_predicted,
+           label = paste("MAE =", round(mae, 2), "\nRMSE =", round(rmse, 2), "\nR2 =", round(r_squared, 2)),
+           hjust = 1, vjust =7, color = "red2", size = 4) +
+  theme(panel.grid.major = element_blank(),  # Remove major gridlines
+        panel.grid.minor = element_blank(),  # Remove minor gridlines
+        axis.line = element_line(color = "black"),  # Keep only the axes lines
+        axis.text = element_text(size = 12, color = "black"),  # Change font of axis labels
+        axis.title = element_text(size = 14, color = "black"),
+        panel.background = element_rect(fill = "white"),
+        plot.title = element_text(hjust = 0.5))  # Center the title
+
+
+# Print the scatter plot
+print(scatter_plot_rf)
+# Save the scatter plot in EMF format
+ggsave("scatter_plot_rf.emf", plot = scatter_plot_rf, device = "emf",width=8,height=6)
+
+
+
+# FeatureIMP_RF -----------------------------------------------------------
+
+
+# Assuming 'data1' is your dataset with the 'SOC_pred1' column and other predictors
+# Random Forest (RF) model
+library(randomForest)
+rf_model <- randomForest(SOC_pred1 ~ ., data = data1, ntree = 500)
+
+# Get feature importance
+importance <- importance(rf_model)
+
+# Sort features by importance
+sorted_importance <- importance[order(importance, decreasing = TRUE), ]
+
+# Set wider margins for the plot
+par(mar = c(5, 9, 4, 2))
+
+# Create a horizontal bar plot with wider margins
+barplot(sorted_importance, horiz = TRUE, main = "Feature Importance", las = 1, cex.names = 0.7, xlim = c(0, max(sorted_importance) * 1.1))
+
+# Add labels to the bars without getting cut off
+text(
+  x = sorted_importance * 1.05,  # Adjust the multiplier as needed
+  y = 1:length(sorted_importance),
+  labels = rownames(sorted_importance),
+  pos = 4,
+  cex = 0.7,
+  col = "blue"
+)
+
+# LASSOmodel --------------------------------------------------------------
+
+# Load the necessary libraries
+library(glmnet)
+library(caret)
+
+# Assuming 'data1' is your dataset with the 'SOC_pred1' column and other predictors
+
+# Split the dataset into training and testing sets (80% training, 20% testing)
+set.seed(123) # For reproducibility
+train_size <- round(0.8 * nrow(data1))
+train_idx <- sample(nrow(data1), train_size)
+train_data <- data1[train_idx, ]
+test_data <- data1[-train_idx, ]
+
+# Exclude the 'rcasiteid' column from modeling
+train_data <- train_data[, !(names(train_data) %in% c("rcasiteid"))]
+test_data <- test_data[, !(names(test_data) %in% c("rcasiteid"))]
+
+# Define the response variable
+y_train <- train_data$SOC_pred1
+y_test <- test_data$SOC_pred1
+
+# Remove the response variable from the training and testing data
+train_data <- train_data[, !(names(train_data) %in% c("SOC_pred1"))]
+test_data <- test_data[, !(names(test_data) %in% c("SOC_pred1"))]
+
+# Convert non-numeric columns to numeric (you may need to adjust this)
+train_data <- data.frame(lapply(train_data, as.numeric))
+test_data <- data.frame(lapply(test_data, as.numeric))
+
+# Fit a LASSO model
+lasso_model <- glmnet(as.matrix(train_data), y_train, alpha = 1)  # Alpha = 1 for LASSO
+
+# Find the best lambda using cross-validation
+cv_model <- cv.glmnet(as.matrix(train_data), y_train, alpha = 1)  # Alpha = 1 for LASSO
+
+# Predict using the best lambda
+lasso_pred <- predict(cv_model, newx = as.matrix(test_data))
+
+# Calculate MAE
+mae <- mean(abs(y_test - lasso_pred))
+
+# Calculate RMSE
+rmse <- sqrt(mean((y_test - lasso_pred)^2))
+
+# Calculate R-squared (R²)
+r_squared <- cor(y_test, lasso_pred)^2
+
+# Print the calculated metrics
+LASSO_MAE<-cat("Mean Absolute Error (MAE):", round(mae, 2), "\n")
+LASSO_RMSE<-cat("Root Mean Squared Error (RMSE):", round(rmse, 2), "\n")
+LASSO_R2<-cat("R-squared (R²):", round(r_squared, 2), "\n")
+
+# Charts LASSO ------------------------------------------------------------
+
+# Load the necessary library
+library(ggplot2)
+
+# Create a data frame for the plot
+plot_data_lasso <- data.frame(Observed = y_test, lambda.1se = lasso_pred) # what is lasso_pred predicting thats in the test data
+
+# Calculate the maximum observed and predicted values
+max_observed <- max(plot_data_lasso$Observed, na.rm = TRUE)
+max_predicted <- max(plot_data_lasso$lambda.1se, na.rm = TRUE)
+
+# Create the scatter plot with annotations
+scatter_plot_lasso <- ggplot(plot_data_lasso, aes(x = Observed, y = lambda.1se)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "blue", linetype = "solid") +
+  labs(x = "Observed", y = "Predicted", title = "Lasso") +
+  theme_bw()+
+  annotate("text", x = max_observed, y = max_predicted,
+           label = paste("MAE =", round(mae, 2), "\nRMSE =", round(rmse, 2), "\nR2 =", round(r_squared, 2)),
+           hjust = 1, vjust =7, color = "red2", size = 4) +
+  theme(panel.grid.major = element_blank(),  # Remove major gridlines
+        panel.grid.minor = element_blank(),  # Remove minor gridlines
+        axis.line = element_line(color = "black"),  # Keep only the axes lines
+        axis.text = element_text(size = 12, color = "black"),  # Change font of axis labels
+        axis.title = element_text(size = 14, color = "black"),
+        panel.background = element_rect(fill = "white"),
+        plot.title = element_text(hjust = 0.5))  # Center the title
+
+# Print the scatter plot
+print(scatter_plot_lasso)
+
+ggsave("scatter_plot_lasso.emf", plot = scatter_plot_lasso, device = "emf",width=8,height=6)
+# SVM ---------------------------------------------------------------------
+
+# Load necessary libraries
+library(e1071)
+library(caret)
+
+# Split the dataset into training and testing sets (80% training, 20% testing)
+set.seed(123) # For reproducibility
+train_size <- round(0.8 * nrow(data1))
+train_idx <- sample(nrow(data1), train_size)
+train_data <- data1[train_idx, ]
+test_data <- data1[-train_idx, ]
+
+# Exclude the 'rcasiteid' column from modeling
+train_data <- train_data[, !(names(train_data) %in% c("rcasiteid"))]
+test_data <- test_data[, !(names(test_data) %in% c("rcasiteid"))]
+
+# Define the response variable
+y_train <- train_data$SOC_pred1
+y_test <- test_data$SOC_pred1
+
+# Remove the response variable from the training and testing data
+train_data <- train_data[, !(names(train_data) %in% c("SOC_pred1"))]
+test_data <- test_data[, !(names(test_data) %in% c("SOC_pred1"))]
+
+# Fit an SVM regression model
+svm_model <- svm(y_train ~ ., data = train_data, kernel = "radial", cost = 1, epsilon = 0.1)
+
+# Make predictions on the test data
+svm_pred <- predict(svm_model, test_data)
+
+# Calculate MAE
+mae <- mean(abs(y_test - svm_pred))
+
+# Calculate RMSE
+rmse <- sqrt(mean((y_test - svm_pred)^2))
+
+# Calculate R-squared (R²)
+r_squared <- cor(y_test, svm_pred)^2
+
+# Print the calculated metrics
+SVM_MAE<-cat("Mean Absolute Error (MAE):", round(mae, 2), "\n")
+SVM_RMSE<-cat("Root Mean Squared Error (RMSE):", round(rmse, 2), "\n")
+SVM_R2<-cat("R-squared (R²):", round(r_squared, 2), "\n")
+
+
+# SVM Plots ---------------------------------------------------------------
+
+
+# Load the necessary library
+library(ggplot2)
+
+# Create a data frame for the plot
+plot_data_svm <- data.frame(Observed = y_test, lambda.1se=svm_pred)
+scatter_plot_svm <- ggplot(plot_data_svm, aes(x = Observed, y = lambda.1se)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "blue", linetype = "solid") +
+  labs(x = "Observed", y = "Predicted", title = "SVM") +
+  theme_bw() +
+  annotate("text", x = max(plot_data_svm$Observed, na.rm = TRUE), y = max(plot_data_svm$lambda.1se, na.rm = TRUE),
+           label = paste("MAE =", round(mae, 2), "\nRMSE =", round(rmse, 2), "\nR2 =", round(r_squared, 2)),
+           hjust = 1, vjust =7, color = "red2", size = 4) +
+  theme(panel.grid.major = element_blank(),  # Remove major gridlines
+        panel.grid.minor = element_blank(),  # Remove minor gridlines
+        axis.line = element_line(color = "black"),  # Keep only the axes lines
+        axis.text = element_text(size = 12, color = "black"),  # Change font of axis labels
+        axis.title = element_text(size = 14, color = "black"),
+        panel.background = element_rect(fill = "white"),
+        plot.title = element_text(hjust = 0.5))  # Center the title
+
+# Display the scatter plot with annotations for LASSO model
+print(scatter_plot_svm)
+
+ggsave("scatter_plot_svm.emf", plot = scatter_plot_svm, device = "emf",width=8,height=6)
+# RTModel -----------------------------------------------------------------
+
+
+# Load necessary libraries
+library(rpart)
+library(caret)
+
+# Split the dataset into training and testing sets (80% training, 20% testing)
+set.seed(123) # For reproducibility
+train_size <- round(0.8 * nrow(data1))
+train_idx <- sample(nrow(data1), train_size)
+train_data <- data1[train_idx, ]
+test_data <- data1[-train_idx, ]
+
+# Exclude the 'rcasiteid' column from modeling
+train_data <- train_data[, !(names(train_data) %in% c("rcasiteid"))]
+test_data <- test_data[, !(names(test_data) %in% c("rcasiteid"))]
+
+# Define the response variable
+y_train <- train_data$SOC_pred1
+y_test <- test_data$SOC_pred1
+
+# Remove the response variable from the training and testing data
+train_data <- train_data[, !(names(train_data) %in% c("SOC_pred1"))]
+test_data <- test_data[, !(names(test_data) %in% c("SOC_pred1"))]
+
+# Fit a regression tree model
+tree_model <- rpart(y_train ~ ., data = train_data)
+
+# Make predictions on the test data
+tree_pred <- predict(tree_model, test_data)
+
+# Calculate MAE
+mae <- mean(abs(y_test - tree_pred))
+
+# Calculate RMSE
+rmse <- sqrt(mean((y_test - tree_pred)^2))
+
+# Calculate R-squared (R²)
+r_squared <- cor(y_test, tree_pred)^2
+
+# Print the calculated metrics
+RT_MAE <- cat("Mean Absolute Error (MAE):", round(mae, 2), "\n")
+RT_RMSE <-cat("Root Mean Squared Error (RMSE):", round(rmse, 2), "\n")
+RT_R2 <- cat("R-squared (R²):", round(r_squared, 2), "\n")
+# Create the scatter plot for RT model
+
+# Charts_RT ---------------------------------------------------------------
+
+
+# Create a data frame for the plot
+plot_data_rt <- data.frame(Observed = y_test, lambda.1se= tree_pred)
+scatter_plot_rt <- ggplot(plot_data_rt, aes(x = Observed, y = lambda.1se)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "blue", linetype = "solid") +
+  labs(x = "Observed", y = "Predicted", title = "Regression tree") +
+  theme_bw() +
+  annotate("text", x = max(plot_data_rt$Observed, na.rm = TRUE), y = max(plot_data_rt$lambda.1se, na.rm = TRUE),
+           label = paste("MAE =", round(mae, 2), "\nRMSE =", round(rmse, 2), "\nR2 =", round(r_squared, 2)),
+           hjust = 1, vjust =7, color = "red2", size = 4) +
+  theme(panel.grid.major = element_blank(),  # Remove major gridlines
+        panel.grid.minor = element_blank(),  # Remove minor gridlines
+        axis.line = element_line(color = "black"),  # Keep only the axes lines
+        axis.text = element_text(size = 12, color = "black"),  # Change font of axis labels
+        axis.title = element_text(size = 14, color = "black"),
+        panel.background = element_rect(fill = "white"),
+        plot.title = element_text(hjust = 0.5))  # Center the title
+
+# Display the scatter plot with annotations for LASSO model
+print(scatter_plot_rt)
+
+ggsave("scatter_plot_rt.emf", plot = scatter_plot_rt, device = "emf",width=8,height=6)
+
